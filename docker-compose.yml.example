@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: env-api-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: envdb
+      POSTGRES_USER: envuser
+      POSTGRES_PASSWORD: change_me_strong
+      TZ: UTC
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U envuser -d envdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
