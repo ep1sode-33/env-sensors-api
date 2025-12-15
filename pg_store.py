@@ -5,6 +5,10 @@
 # Timestamp policy:
 #   - API and DB both use SECOND precision only (no fractional seconds).
 #   - Table uses TIMESTAMPTZ(0) and we truncate existing data to seconds on schema ensure.
+#
+# Value formatting policy:
+#   - API outputs should be clean (e.g. 2 decimals). REAL/float can show tails after AVG().
+#   - We ROUND() in SQL and also round again in Python before returning JSON.
 
 from __future__ import annotations
 
@@ -44,6 +48,9 @@ class PostgresStore:
       status (smallint)  -- 0=OK, 1=MISSING, 2=ERROR (Scheme A typically stores only OK rows)
     """
 
+    # Output precision (for JSON)
+    OUT_DECIMALS = 2
+
     def __init__(self, cfg: DbConfig):
         if psycopg is None or ConnectionPool is None or sql is None:
             raise RuntimeError(f"psycopg not available: {_IMPORT_ERROR!r}")
@@ -72,6 +79,19 @@ class PostgresStore:
             dt = dt.replace(tzinfo=timezone.utc)
         dt = dt.astimezone(timezone.utc)
         return dt.replace(microsecond=0)
+
+    @classmethod
+    def _round_out(cls, v: Any) -> Optional[float]:
+        """
+        Normalize numeric results for JSON output.
+        Handles float/Decimal/etc. Returns float rounded to OUT_DECIMALS.
+        """
+        if v is None:
+            return None
+        try:
+            return round(float(v), cls.OUT_DECIMALS)
+        except Exception:
+            return None
 
     def ensure_schema(self) -> None:
         """
@@ -114,6 +134,12 @@ class PostgresStore:
     ) -> None:
         ts = self._to_utc(ts)
 
+        # Optional: round before storing (keeps raw rows tidy; AVG() still needs ROUND()).
+        t_sht = round(float(temp_sht_c), self.OUT_DECIMALS)
+        t_qmp = round(float(temp_qmp_c), self.OUT_DECIMALS)
+        rh = round(float(humidity_pct), self.OUT_DECIMALS)
+        p = round(float(pressure_hpa), self.OUT_DECIMALS)
+
         q = """
         INSERT INTO env_samples (ts, temp_sht_c, temp_qmp_c, humidity_pct, pressure_hpa, status)
         VALUES (%(ts)s, %(t_sht)s, %(t_qmp)s, %(rh)s, %(p)s, %(status)s)
@@ -128,10 +154,10 @@ class PostgresStore:
 
         params = {
             "ts": ts,
-            "t_sht": float(temp_sht_c),
-            "t_qmp": float(temp_qmp_c),
-            "rh": float(humidity_pct),
-            "p": float(pressure_hpa),
+            "t_sht": t_sht,
+            "t_qmp": t_qmp,
+            "rh": rh,
+            "p": p,
             "status": int(status),
         }
 
@@ -158,6 +184,8 @@ class PostgresStore:
         """
         Returns regular buckets using generate_series.
         For each bucket [t, t+step), aggregate AVG of available samples; if none -> NULL fields + status='MISSING'.
+
+        NOTE: We ROUND(AVG(...), 2) in SQL to avoid float tails in JSON.
         """
         start = self._to_utc(start)
         end = self._to_utc(end)
@@ -175,7 +203,7 @@ class PostgresStore:
         if est_points > max_points:
             raise ValueError(f"too many points: {est_points} > max_points={max_points}")
 
-        q = """
+        q = f"""
         WITH params AS (
             SELECT
                 %(start)s::timestamptz AS start_ts,
@@ -191,10 +219,10 @@ class PostgresStore:
         windowed AS (
             SELECT
                 b.bucket_ts,
-                AVG(s.temp_sht_c)   AS temp_sht_c,
-                AVG(s.temp_qmp_c)   AS temp_qmp_c,
-                AVG(s.humidity_pct) AS humidity_pct,
-                AVG(s.pressure_hpa) AS pressure_hpa,
+                ROUND(AVG(s.temp_sht_c)::numeric, {self.OUT_DECIMALS})   AS temp_sht_c,
+                ROUND(AVG(s.temp_qmp_c)::numeric, {self.OUT_DECIMALS})   AS temp_qmp_c,
+                ROUND(AVG(s.humidity_pct)::numeric, {self.OUT_DECIMALS}) AS humidity_pct,
+                ROUND(AVG(s.pressure_hpa)::numeric, {self.OUT_DECIMALS}) AS pressure_hpa,
                 COUNT(s.ts)         AS n
             FROM buckets b
             LEFT JOIN env_samples s
@@ -224,10 +252,10 @@ class PostgresStore:
             out.append(
                 {
                     "ts": ts_utc,
-                    "temperature_c": None if t_sht is None else float(t_sht),
-                    "qmp_temp_c": None if t_qmp is None else float(t_qmp),
-                    "humidity_pct": None if rh is None else float(rh),
-                    "pressure_hpa": None if p is None else float(p),
+                    "temperature_c": self._round_out(t_sht),
+                    "qmp_temp_c": self._round_out(t_qmp),
+                    "humidity_pct": self._round_out(rh),
+                    "pressure_hpa": self._round_out(p),
                     "status": str(status),
                 }
             )
@@ -247,6 +275,8 @@ class PostgresStore:
         Handles outages/missing gaps by capping each sample's weight to base_step_seconds.
         avg = SUM(v * dur) / SUM(dur)
         dur = min(next_ts - ts, base_step_seconds), clamped >= 0
+
+        NOTE: result is rounded to OUT_DECIMALS in SQL + Python.
         """
         start = self._to_utc(start)
         end = self._to_utc(end)
@@ -267,17 +297,17 @@ class PostgresStore:
 
         col_ident = sql.Identifier(allowed[column])
 
-        q = sql.SQL("""
+        q = sql.SQL(f"""
             WITH data AS (
                 SELECT
                     ts,
-                    {col} AS v,
+                    {col_ident.as_string(None)} AS v,
                     LEAD(ts) OVER (ORDER BY ts) AS next_ts
                 FROM env_samples
                 WHERE ts >= %(start)s
                   AND ts <  %(end)s
                   AND status = 0
-                  AND {col} IS NOT NULL
+                  AND {col_ident.as_string(None)} IS NOT NULL
             ),
             weighted AS (
                 SELECT
@@ -294,7 +324,42 @@ class PostgresStore:
             SELECT
                 CASE
                     WHEN SUM(dur) = 0 THEN NULL
-                    ELSE SUM(v * dur) / SUM(dur)
+                    ELSE ROUND((SUM(v * dur) / SUM(dur))::numeric, {self.OUT_DECIMALS})
+                END AS avg
+            FROM weighted
+            WHERE dur > 0;
+        """)
+
+        # Use psycopg SQL compositing properly (Identifier can't be interpolated with as_string(None) reliably)
+        # Build again the query with proper formatting:
+        q = sql.SQL(f"""
+            WITH data AS (
+                SELECT
+                    ts,
+                    {{col}} AS v,
+                    LEAD(ts) OVER (ORDER BY ts) AS next_ts
+                FROM env_samples
+                WHERE ts >= %(start)s
+                  AND ts <  %(end)s
+                  AND status = 0
+                  AND {{col}} IS NOT NULL
+            ),
+            weighted AS (
+                SELECT
+                    v,
+                    GREATEST(
+                        0,
+                        LEAST(
+                            %(step)s::double precision,
+                            EXTRACT(EPOCH FROM (COALESCE(next_ts, %(end)s) - ts))
+                        )
+                    ) AS dur
+                FROM data
+            )
+            SELECT
+                CASE
+                    WHEN SUM(dur) = 0 THEN NULL
+                    ELSE ROUND((SUM(v * dur) / SUM(dur))::numeric, {self.OUT_DECIMALS})
                 END AS avg
             FROM weighted
             WHERE dur > 0;
@@ -306,4 +371,4 @@ class PostgresStore:
 
         if not row:
             return None
-        return None if row[0] is None else float(row[0])
+        return self._round_out(row[0])
