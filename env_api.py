@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 from fastapi import FastAPI, HTTPException, APIRouter, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 import driver  # <-- your hardware-only module (metrics/healthz)
 
@@ -34,6 +36,9 @@ DEFAULT_MAX_POINTS = int(os.getenv("DEFAULT_MAX_POINTS", "100000"))
 DB_DSN = os.getenv("DATABASE_URL")  # e.g. postgresql://user:pass@host:5432/dbname
 DB_ENABLE = os.getenv("DB_ENABLE", "1" if DB_DSN else "0") == "1"
 DB_AUTO_SCHEMA = os.getenv("DB_AUTO_SCHEMA", "1") == "1"
+
+# Frontend origin(s) for CORS, comma-separated. Default allows all (no IP leak).
+ALLOW_ORIGINS = [o.strip() for o in os.getenv("ALLOW_ORIGINS", "*").split(",") if o.strip()]
 
 
 # ---- Time helpers (SECOND precision only) ----
@@ -311,6 +316,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# ---- CORS (allow only your frontend origin) ----
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOW_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
+
 router = APIRouter(prefix="/v1")
 
 
@@ -474,6 +489,9 @@ def average(
 
 
 app.include_router(router)
+
+# Serve static frontend (index.html) at root
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn

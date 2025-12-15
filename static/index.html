@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Temperature Dashboard</title>
+    <!-- Tailwind CSS with DaisyUI -->
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.4.19/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        .chart-container {
+            width: 100%;
+            height: 300px;
+        }
+        
+        .indicator-container {
+            width: 100%;
+            height: 250px;
+        }
+        
+        .stat-card {
+            transition: all 0.3s ease;
+            border: 1px solid rgba(0, 0, 0, 0.05);
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+        
+        .stat-value {
+            background: linear-gradient(135deg, var(--fallback-bc, oklch(var(--bc))) 0%, var(--fallback-bc, oklch(var(--bc))) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .header-gradient {
+            background: linear-gradient(135deg, hsl(var(--p)) 0%, hsl(var(--s)) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        .icon-wrapper {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.9;
+        }
+        
+        .indicator .badge {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.7;
+            }
+        }
+    </style>
+</head>
+<body class="bg-base-200 min-h-screen">
+    <div class="container mx-auto p-6 max-w-7xl">
+        <!-- Header -->
+        <div class="mb-8 fade-in">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h1 class="text-5xl font-bold header-gradient mb-2">Temperature Dashboard</h1>
+                    <p class="text-base-content/70 text-lg">Real-time monitoring of environmental metrics</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- CORS Error Alert -->
+        <div id="corsAlert" class="alert alert-error mb-6 hidden">
+            <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+                <h3 class="font-bold">CORS Error Detected</h3>
+                <div class="text-xs mt-1">
+                    <p>The API server is blocking cross-origin requests. To fix this:</p>
+                    <ol class="list-decimal list-inside mt-2 space-y-1">
+                        <li><strong>Best solution:</strong> Configure the API server to add CORS headers</li>
+                        <li><strong>Quick fix:</strong> Install a browser extension like "CORS Unblock" or "Allow CORS"</li>
+                        <li><strong>Development:</strong> Run Chrome with: <code class="bg-base-200 px-1 rounded">chrome.exe --disable-web-security --user-data-dir="C:/temp/chrome_dev"</code></li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls Card -->
+        <div class="card bg-base-100 shadow-lg border border-base-300 mb-6 fade-in">
+            <div class="card-body p-5">
+                <div class="flex flex-wrap gap-4 items-end">
+                    <div class="form-control flex-1 min-w-[180px]">
+                        <label class="label pb-2">
+                            <span class="label-text font-medium text-sm">Time Range</span>
+                        </label>
+                        <select id="timeRange" class="select select-bordered select-sm w-full">
+                            <option value="30m">Last 30 Minutes</option>
+                            <option value="1h">Last 1 Hour</option>
+                            <option value="3h" selected>Last 3 Hours</option>
+                            <option value="6h">Last 6 Hours</option>
+                            <option value="12h">Last 12 Hours</option>
+                            <option value="1d">Last 1 Day</option>
+                            <option value="1w">Last 1 Week</option>
+                            <option value="1m">Last 1 Month</option>
+                            <option value="3m">Last 3 Months</option>
+                            <option value="6m">Last 6 Months</option>
+                            <option value="1y">Last 1 Year</option>
+                            <option value="2y">Last 2 Years</option>
+                            <option value="3y">Last 3 Years</option>
+                        </select>
+                    </div>
+                    <div class="form-control flex-1 min-w-[180px]">
+                        <label class="label pb-2">
+                            <span class="label-text font-medium text-sm">Update Interval</span>
+                        </label>
+                        <select id="updateInterval" class="select select-bordered select-sm w-full">
+                            <option value="30000" selected>30 seconds</option>
+                            <option value="60000">1 minute</option>
+                        </select>
+                    </div>
+                    <div class="form-control flex-1 min-w-[180px]">
+                        <label class="label pb-2">
+                            <span class="label-text font-medium text-sm">Theme</span>
+                        </label>
+                        <select id="themeSelector" class="select select-bordered select-sm w-full">
+                            <option value="light">Light</option>
+                            <option value="dark">Dark</option>
+                            <option value="cupcake">Cupcake</option>
+                            <option value="bumblebee">Bumblebee</option>
+                            <option value="emerald">Emerald</option>
+                            <option value="corporate">Corporate</option>
+                            <option value="synthwave">Synthwave</option>
+                            <option value="retro">Retro</option>
+                            <option value="cyberpunk">Cyberpunk</option>
+                            <option value="valentine">Valentine</option>
+                            <option value="halloween">Halloween</option>
+                            <option value="garden">Garden</option>
+                            <option value="forest">Forest</option>
+                            <option value="aqua">Aqua</option>
+                            <option value="lofi">Lofi</option>
+                            <option value="pastel">Pastel</option>
+                            <option value="fantasy">Fantasy</option>
+                            <option value="wireframe">Wireframe</option>
+                            <option value="black">Black</option>
+                            <option value="luxury">Luxury</option>
+                            <option value="dracula">Dracula</option>
+                            <option value="cmyk">CMYK</option>
+                            <option value="autumn">Autumn</option>
+                            <option value="business">Business</option>
+                            <option value="acid">Acid</option>
+                            <option value="lemonade">Lemonade</option>
+                            <option value="night">Night</option>
+                            <option value="coffee">Coffee</option>
+                            <option value="winter">Winter</option>
+                        </select>
+                    </div>
+                    <div class="form-control">
+                        <button id="pauseBtn" class="btn btn-sm btn-outline">Pause</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Plotly Indicator Gauges -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
+            <!-- Temperature Gauge -->
+            <div class="card bg-base-100 shadow-lg border border-base-300 stat-card fade-in">
+                <div class="card-body p-4">
+                    <h3 class="text-sm font-semibold text-base-content/70 uppercase tracking-wide text-center mb-2">Temperature</h3>
+                    <div id="tempIndicator" class="indicator-container"></div>
+                </div>
+            </div>
+
+            <!-- Humidity Gauge -->
+            <div class="card bg-base-100 shadow-lg border border-base-300 stat-card fade-in">
+                <div class="card-body p-4">
+                    <h3 class="text-sm font-semibold text-base-content/70 uppercase tracking-wide text-center mb-2">Humidity</h3>
+                    <div id="humidityIndicator" class="indicator-container"></div>
+                </div>
+            </div>
+
+            <!-- Pressure Gauge -->
+            <div class="card bg-base-100 shadow-lg border border-base-300 stat-card fade-in">
+                <div class="card-body p-4">
+                    <h3 class="text-sm font-semibold text-base-content/70 uppercase tracking-wide text-center mb-2">Pressure</h3>
+                    <div id="pressureIndicator" class="indicator-container"></div>
+                </div>
+            </div>
+
+            <!-- QMP Temp Gauge -->
+            <div class="card bg-base-100 shadow-lg border border-base-300 stat-card fade-in">
+                <div class="card-body p-4">
+                    <h3 class="text-sm font-semibold text-base-content/70 uppercase tracking-wide text-center mb-3">Averages</h3>
+                    <div class="flex flex-col gap-3">
+                        <div class="form-control">
+                            <label class="label pb-1">
+                                <span class="label-text text-xs font-medium">Window</span>
+                            </label>
+                            <select id="avgWindow" class="select select-bordered select-xs w-full">
+                                <option value="1y">Last 1 Year</option>
+                                <option value="6m">Last 6 Months</option>
+                                <option value="3m">Last 3 Months</option>
+                                <option value="1m">Last 1 Month</option>
+                                <option value="1w" selected>Last 1 Week</option>
+                                <option value="1d">Last 1 Day</option>
+                                <option value="12h">Last 12 Hours</option>
+                                <option value="6h">Last 6 Hours</option>
+                                <option value="3h">Last 3 Hours</option>
+                                <option value="1h">Last 1 Hour</option>
+                                <option value="30m">Last 30 Minutes</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label class="label pb-1">
+                                <span class="label-text text-xs font-medium">Metric</span>
+                            </label>
+                            <select id="avgMetric" class="select select-bordered select-xs w-full">
+                                <option value="temp_sht_c" selected>SHT30 Temp (°C)</option>
+                                <option value="temp_qmp_c">QMP Temp (°C)</option>
+                                <option value="humidity_pct">Humidity (%)</option>
+                                <option value="pressure_hpa">Pressure (hPa)</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center justify-between bg-base-200 rounded-lg p-3">
+                            <div class="text-xs text-base-content/60">Average</div>
+                            <div id="avgValue" class="text-3xl font-semibold stat-value">--</div>
+                        </div>
+                        <div class="text-[11px] text-base-content/60 text-right">Auto-refresh 1 min</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Historical Data Charts -->
+        <div class="mb-6">
+            <h2 class="text-2xl font-bold mb-5 fade-in">Historical Data</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <!-- Temperature Chart -->
+                <div class="card bg-base-100 shadow-lg border border-base-300 fade-in">
+                    <div class="card-body p-6">
+                        <h3 class="text-lg font-semibold mb-4">Temperature (°C)</h3>
+                        <div id="tempChart" class="rounded-lg overflow-hidden" style="height: 300px;"></div>
+                    </div>
+                </div>
+
+                <!-- Humidity Chart -->
+                <div class="card bg-base-100 shadow-lg border border-base-300 fade-in">
+                    <div class="card-body p-6">
+                        <h3 class="text-lg font-semibold mb-4">Humidity (%)</h3>
+                        <div id="humidityChart" class="rounded-lg overflow-hidden" style="height: 300px;"></div>
+                    </div>
+                </div>
+
+                <!-- Pressure Chart -->
+                <div class="card bg-base-100 shadow-lg border border-base-300 fade-in">
+                    <div class="card-body p-6">
+                        <h3 class="text-lg font-semibold mb-4">Pressure (hPa)</h3>
+                        <div id="pressureChart" class="rounded-lg overflow-hidden" style="height: 300px;"></div>
+                    </div>
+                </div>
+
+                <!-- QMP Temp Chart -->
+                <div class="card bg-base-100 shadow-lg border border-base-300 fade-in">
+                    <div class="card-body p-6">
+                        <h3 class="text-lg font-semibold mb-4">QMP Temp (°C)</h3>
+                        <div id="qmpTempChart" class="rounded-lg overflow-hidden" style="height: 300px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE = `${window.location.origin}/v1`;
+        const METRICS_URL = `${API_BASE}/metrics`;
+        const RANGE_URL = `${API_BASE}/metrics_range`;
+        const AVERAGE_URL = `${API_BASE}/average`;
+        const STEP_SECONDS = 30;
+        const GAUGE_POLL_MS = 30000;
+        const AVG_POLL_MS = 60000;
+        let updateInterval = GAUGE_POLL_MS; // shared for historical refresh only
+        let historyIntervalId = null;
+        let gaugeIntervalId = null;
+        let averageIntervalId = null;
+        let isPaused = false;
+
+        // Initialize Plotly Indicator Gauges
+        function initIndicators() {
+            // Temperature Gauge (0-50°C)
+            Plotly.newPlot('tempIndicator', [{
+                type: "indicator",
+                mode: "gauge+number+delta",
+                value: 0,
+                domain: { x: [0, 1], y: [0, 1] },
+                title: { text: "°C", font: { size: 16 } },
+                delta: { reference: 25, position: "top" },
+                gauge: {
+                    axis: { range: [null, 50], tickwidth: 1, tickcolor: "darkblue" },
+                    bar: { color: "#ef4444" },
+                    bgcolor: "white",
+                    borderwidth: 2,
+                    bordercolor: "gray",
+                    steps: [
+                        { range: [0, 20], color: "lightblue" },
+                        { range: [20, 30], color: "lightgreen" },
+                        { range: [30, 50], color: "lightyellow" }
+                    ],
+                    threshold: {
+                        line: { color: "red", width: 4 },
+                        thickness: 0.75,
+                        value: 40
+                    }
+                }
+            }], {
+                margin: { l: 20, r: 20, t: 20, b: 20 },
+                paper_bgcolor: "rgba(0,0,0,0)",
+                plot_bgcolor: "rgba(0,0,0,0)"
+            }, { responsive: true, displayModeBar: false });
+
+            // Humidity Gauge (0-100%)
+            Plotly.newPlot('humidityIndicator', [{
+                type: "indicator",
+                mode: "gauge+number+delta",
+                value: 0,
+                domain: { x: [0, 1], y: [0, 1] },
+                title: { text: "%", font: { size: 16 } },
+                delta: { reference: 45, position: "top" },
+                gauge: {
+                    axis: { range: [null, 100], tickwidth: 1, tickcolor: "darkblue" },
+                    bar: { color: "#3b82f6" },
+                    bgcolor: "white",
+                    borderwidth: 2,
+                    bordercolor: "gray",
+                    steps: [
+                        { range: [0, 30], color: "lightyellow" },
+                        { range: [30, 60], color: "lightgreen" },
+                        { range: [60, 100], color: "lightblue" }
+                    ],
+                    threshold: {
+                        line: { color: "red", width: 4 },
+                        thickness: 0.75,
+                        value: 80
+                    }
+                }
+            }], {
+                margin: { l: 20, r: 20, t: 20, b: 20 },
+                paper_bgcolor: "rgba(0,0,0,0)",
+                plot_bgcolor: "rgba(0,0,0,0)"
+            }, { responsive: true, displayModeBar: false });
+
+            // Pressure Gauge (800-1100 hPa)
+            Plotly.newPlot('pressureIndicator', [{
+                type: "indicator",
+                mode: "gauge+number",
+                value: 0,
+                domain: { x: [0, 1], y: [0, 1] },
+                title: { text: "hPa", font: { size: 16 } },
+                gauge: {
+                    axis: { range: [800, 1100], tickwidth: 1, tickcolor: "darkblue" },
+                    bar: { color: "#10b981" },
+                    bgcolor: "white",
+                    borderwidth: 2,
+                    bordercolor: "gray",
+                    steps: [
+                        { range: [800, 900], color: "lightyellow" },
+                        { range: [900, 1100], color: "lightgreen" }
+                    ],
+                    threshold: {
+                        line: { color: "red", width: 4 },
+                        thickness: 0.75,
+                        value: 1050
+                    }
+                }
+            }], {
+                margin: { l: 20, r: 20, t: 20, b: 20 },
+                paper_bgcolor: "rgba(0,0,0,0)",
+                plot_bgcolor: "rgba(0,0,0,0)"
+            }, { responsive: true, displayModeBar: false });
+        }
+
+        // Update Indicator Gauges
+        function updateIndicators(data) {
+            // Update Temperature
+            Plotly.update('tempIndicator', {
+                value: [data.temperature_c],
+                delta: { reference: 25, color: withinBand(data.temperature_c, 25, 5) ? '#22c55e' : '#ef4444' }
+            });
+
+            // Update Humidity
+            Plotly.update('humidityIndicator', {
+                value: [data.humidity_pct],
+                delta: { reference: 45, color: withinBand(data.humidity_pct, 45, 5) ? '#22c55e' : '#ef4444' }
+            });
+
+            // Update Pressure
+            Plotly.update('pressureIndicator', {
+                value: [data.pressure_hpa],
+            });
+        }
+
+        // Get theme-aware colors
+        function getThemeColors() {
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+                          document.documentElement.getAttribute('data-theme') === 'night' ||
+                          document.documentElement.getAttribute('data-theme') === 'synthwave' ||
+                          document.documentElement.getAttribute('data-theme') === 'dracula' ||
+                          document.documentElement.getAttribute('data-theme') === 'black' ||
+                          document.documentElement.getAttribute('data-theme') === 'coffee' ||
+                          document.documentElement.getAttribute('data-theme') === 'cyberpunk';
+            
+            // Get computed styles for base colors
+            const computedStyle = getComputedStyle(document.documentElement);
+            const baseContent = computedStyle.getPropertyValue('--bc') || '0 0% 0%';
+            const base100 = computedStyle.getPropertyValue('--b1') || '0 0% 100%';
+            
+            if (isDark) {
+                return {
+                    textColor: 'rgba(255, 255, 255, 0.8)',
+                    textColorSecondary: 'rgba(255, 255, 255, 0.6)',
+                    gridColor: 'rgba(255, 255, 255, 0.1)',
+                    lineColor: 'rgba(255, 255, 255, 0.15)',
+                    legendBg: 'rgba(0, 0, 0, 0.7)',
+                    legendBorder: 'rgba(255, 255, 255, 0.2)',
+                    hoverBg: 'rgba(0, 0, 0, 0.9)',
+                    hoverBorder: 'rgba(255, 255, 255, 0.3)'
+                };
+            } else {
+                return {
+                    textColor: 'rgba(0, 0, 0, 0.8)',
+                    textColorSecondary: 'rgba(0, 0, 0, 0.6)',
+                    gridColor: 'rgba(0, 0, 0, 0.08)',
+                    lineColor: 'rgba(0, 0, 0, 0.1)',
+                    legendBg: 'rgba(255, 255, 255, 0.9)',
+                    legendBorder: 'rgba(0, 0, 0, 0.1)',
+                    hoverBg: 'rgba(255, 255, 255, 0.95)',
+                    hoverBorder: 'rgba(0, 0, 0, 0.2)'
+                };
+            }
+        }
+
+        // Initialize Plotly charts
+        function initCharts() {
+            const themeColors = getThemeColors();
+            
+            const commonLayout = {
+                xaxis: {
+                    title: {
+                        text: 'Time',
+                        font: { size: 12, color: themeColors.textColorSecondary }
+                    },
+                    type: 'date',
+                    showgrid: true,
+                    gridcolor: themeColors.gridColor,
+                    gridwidth: 1,
+                    zeroline: false,
+                    showline: true,
+                    linecolor: themeColors.lineColor,
+                    linewidth: 1,
+                    tickfont: { size: 10, color: themeColors.textColorSecondary }
+                },
+                yaxis: {
+                    showgrid: true,
+                    gridcolor: themeColors.gridColor,
+                    gridwidth: 1,
+                    zeroline: false,
+                    showline: true,
+                    linecolor: themeColors.lineColor,
+                    linewidth: 1,
+                    tickfont: { size: 10, color: themeColors.textColorSecondary }
+                },
+                legend: {
+                    x: 0.02,
+                    y: 0.98,
+                    xanchor: 'left',
+                    yanchor: 'top',
+                    bgcolor: themeColors.legendBg,
+                    bordercolor: themeColors.legendBorder,
+                    borderwidth: 1,
+                    font: { size: 11, color: themeColors.textColor }
+                },
+                hovermode: 'x unified',
+                hoverlabel: {
+                    bgcolor: themeColors.hoverBg,
+                    bordercolor: themeColors.hoverBorder,
+                    font: { size: 11, color: themeColors.textColor }
+                },
+                margin: { l: 50, r: 20, t: 10, b: 50 },
+                plot_bgcolor: 'rgba(0, 0, 0, 0)',
+                paper_bgcolor: 'rgba(0, 0, 0, 0)',
+                font: {
+                    family: 'system-ui, -apple-system, sans-serif',
+                    color: themeColors.textColor
+                }
+            };
+
+            const config = {
+                responsive: true,
+                displayModeBar: true,
+                displaylogo: false,
+                modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+                toImageButtonOptions: {
+                    format: 'png',
+                    filename: 'temperature-dashboard',
+                    height: 400,
+                    width: 800,
+                    scale: 2
+                }
+            };
+
+            // Temperature Chart
+            Plotly.newPlot('tempChart', [{
+                x: [],
+                y: [],
+                name: 'Temperature (°C)',
+                type: 'scatter',
+                mode: 'lines',
+                line: { 
+                    color: '#ef4444', 
+                    width: 2.5,
+                    shape: 'spline', 
+                    smoothing: 1.3 
+                },
+                hovertemplate: '<b>Temperature</b><br>%{x}<br>%{y:.2f} °C<extra></extra>'
+            }], {
+                ...commonLayout,
+                yaxis: {
+                    ...commonLayout.yaxis,
+                    title: {
+                        text: 'Temperature (°C)',
+                        font: { size: 12, color: themeColors.textColorSecondary }
+                    }
+                }
+            }, config);
+
+            // Humidity Chart
+            Plotly.newPlot('humidityChart', [{
+                x: [],
+                y: [],
+                name: 'Humidity (%)',
+                type: 'scatter',
+                mode: 'lines',
+                line: { 
+                    color: '#3b82f6', 
+                    width: 2.5,
+                    shape: 'spline', 
+                    smoothing: 1.3 
+                },
+                hovertemplate: '<b>Humidity</b><br>%{x}<br>%{y:.2f} %<extra></extra>'
+            }], {
+                ...commonLayout,
+                yaxis: {
+                    ...commonLayout.yaxis,
+                    title: {
+                        text: 'Humidity (%)',
+                        font: { size: 12, color: themeColors.textColorSecondary }
+                    }
+                }
+            }, config);
+
+            // Pressure Chart
+            Plotly.newPlot('pressureChart', [{
+                x: [],
+                y: [],
+                name: 'Pressure (hPa)',
+                type: 'scatter',
+                mode: 'lines',
+                line: { 
+                    color: '#10b981', 
+                    width: 2.5,
+                    shape: 'spline', 
+                    smoothing: 1.3 
+                },
+                hovertemplate: '<b>Pressure</b><br>%{x}<br>%{y:.2f} hPa<extra></extra>'
+            }], {
+                ...commonLayout,
+                yaxis: {
+                    ...commonLayout.yaxis,
+                    title: {
+                        text: 'Pressure (hPa)',
+                        font: { size: 12, color: themeColors.textColorSecondary }
+                    }
+                }
+            }, config);
+
+            // QMP Temp Chart
+            Plotly.newPlot('qmpTempChart', [{
+                x: [],
+                y: [],
+                name: 'QMP Temp (°C)',
+                type: 'scatter',
+                mode: 'lines',
+                line: { 
+                    color: '#f59e0b', 
+                    width: 2.5,
+                    shape: 'spline', 
+                    smoothing: 1.3 
+                },
+                hovertemplate: '<b>QMP Temp</b><br>%{x}<br>%{y:.2f} °C<extra></extra>'
+            }], {
+                ...commonLayout,
+                yaxis: {
+                    ...commonLayout.yaxis,
+                    title: {
+                        text: 'QMP Temp (°C)',
+                        font: { size: 12, color: themeColors.textColorSecondary }
+                    }
+                }
+            }, config);
+        }
+
+        // Update chart themes
+        function updateChartThemes() {
+            const themeColors = getThemeColors();
+            
+            const commonUpdate = {
+                'xaxis.title.font.color': themeColors.textColorSecondary,
+                'xaxis.tickfont.color': themeColors.textColorSecondary,
+                'xaxis.gridcolor': themeColors.gridColor,
+                'xaxis.linecolor': themeColors.lineColor,
+                'yaxis.tickfont.color': themeColors.textColorSecondary,
+                'yaxis.gridcolor': themeColors.gridColor,
+                'yaxis.linecolor': themeColors.lineColor,
+                'legend.bgcolor': themeColors.legendBg,
+                'legend.bordercolor': themeColors.legendBorder,
+                'legend.font.color': themeColors.textColor,
+                'hoverlabel.bgcolor': themeColors.hoverBg,
+                'hoverlabel.bordercolor': themeColors.hoverBorder,
+                'hoverlabel.font.color': themeColors.textColor,
+                'font.color': themeColors.textColor
+            };
+            
+            // Update all four charts
+            Plotly.relayout('tempChart', {
+                ...commonUpdate,
+                'yaxis.title.font.color': themeColors.textColorSecondary
+            });
+            
+            Plotly.relayout('humidityChart', {
+                ...commonUpdate,
+                'yaxis.title.font.color': themeColors.textColorSecondary
+            });
+            
+            Plotly.relayout('pressureChart', {
+                ...commonUpdate,
+                'yaxis.title.font.color': themeColors.textColorSecondary
+            });
+            
+            Plotly.relayout('qmpTempChart', {
+                ...commonUpdate,
+                'yaxis.title.font.color': themeColors.textColorSecondary
+            });
+        }
+
+        // Helpers
+        function alignToStep(date, stepSeconds = STEP_SECONDS) {
+            const ms = stepSeconds * 1000;
+            return new Date(Math.floor(date.getTime() / ms) * ms);
+        }
+
+        function isoSeconds(date) {
+            return date.toISOString().split('.')[0] + 'Z';
+        }
+
+        function rangeToDurationMs(key) {
+            const hour = 60 * 60 * 1000;
+            const day = 24 * hour;
+            switch (key) {
+                case '30m': return 30 * 60 * 1000;
+                case '1h': return hour;
+                case '3h': return 3 * hour;
+                case '6h': return 6 * hour;
+                case '12h': return 12 * hour;
+                case '1d': return day;
+                case '1w': return 7 * day;
+                case '1m': {
+                    const d = new Date();
+                    d.setMonth(d.getMonth() - 1);
+                    return Math.max(30 * day, Date.now() - d.getTime());
+                }
+                case '3m': {
+                    const d = new Date();
+                    d.setMonth(d.getMonth() - 3);
+                    return Math.max(90 * day, Date.now() - d.getTime());
+                }
+                case '6m': {
+                    const d = new Date();
+                    d.setMonth(d.getMonth() - 6);
+                    return Math.max(180 * day, Date.now() - d.getTime());
+                }
+                case '1y': return 365 * day;
+                case '2y': return 365 * 2 * day;
+                case '3y': return 365 * 3 * day;
+                default: return 6 * hour;
+            }
+        }
+
+        function chooseStepSeconds(durationMs) {
+            const hours = durationMs / (1000 * 60 * 60);
+            if (hours <= 6) return 30; // 30s
+            if (hours <= 12) return 60; // 1m
+            if (hours <= 24) return 300; // 5m
+            if (hours <= 24 * 7) return 900; // 15m
+            if (hours <= 24 * 30) return 1800; // 30m
+            if (hours <= 24 * 90) return 3600; // 1h
+            if (hours <= 24 * 180) return 7200; // 2h
+            if (hours <= 24 * 365) return 21600; // 6h
+            return 43200; // 12h
+        }
+
+        function computeRange(key) {
+            const durationMs = rangeToDurationMs(key);
+            const end = alignToStep(new Date());
+            const start = alignToStep(new Date(end.getTime() - durationMs));
+            const step = chooseStepSeconds(durationMs);
+            return { start, end, stepSeconds: step };
+        }
+
+        function withinBand(value, center, tolerance) {
+            if (value === undefined || value === null) return false;
+            return Math.abs(Number(value) - center) <= tolerance;
+        }
+
+        // Fetch gauges (/metrics)
+        async function fetchMetrics() {
+            const corsAlert = document.getElementById('corsAlert');
+            try {
+                const response = await fetch(METRICS_URL, { method: 'GET', mode: 'cors' });
+                corsAlert.classList.add('hidden');
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                const data = await response.json();
+                updateIndicators(data);
+            } catch (error) {
+                console.error('Error fetching metrics:', error);
+                const isCorsError = error.message.includes('CORS') ||
+                    error.message.includes('Failed to fetch') ||
+                    error.message.includes('NetworkError') ||
+                    error.name === 'TypeError' ||
+                    (error.message && error.message.toLowerCase().includes('cors'));
+                if (isCorsError) {
+                    corsAlert.classList.remove('hidden');
+                }
+            }
+        }
+
+        // Fetch historical data (/metrics_range)
+        async function fetchHistoricalData() {
+            if (isPaused) return;
+            const corsAlert = document.getElementById('corsAlert');
+            const rangeKey = document.getElementById('timeRange').value;
+            const { start, end, stepSeconds } = computeRange(rangeKey);
+            const params = new URLSearchParams({
+                start: isoSeconds(start),
+                end: isoSeconds(end),
+                step: stepSeconds.toString()
+            });
+            try {
+                const response = await fetch(`${RANGE_URL}?${params.toString()}`, { method: 'GET', mode: 'cors' });
+                corsAlert.classList.add('hidden');
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                const payload = await response.json();
+                const points = payload.points || [];
+                const timestamps = points.map(p => new Date(p.ts));
+                const temperatures = points.map(p => p.temperature_c ?? p.temp_sht_c ?? null);
+                const humidities = points.map(p => p.humidity_pct ?? null);
+                const pressures = points.map(p => p.pressure_hpa ?? null);
+                const qmpTemps = points.map(p => p.qmp_temp_c ?? null);
+
+                Plotly.update('tempChart', { x: [timestamps], y: [temperatures] }, {}, [0]);
+                Plotly.update('humidityChart', { x: [timestamps], y: [humidities] }, {}, [0]);
+                Plotly.update('pressureChart', { x: [timestamps], y: [pressures] }, {}, [0]);
+                Plotly.update('qmpTempChart', { x: [timestamps], y: [qmpTemps] }, {}, [0]);
+            } catch (error) {
+                console.error('Error fetching historical data:', error);
+                const isCorsError = error.message.includes('CORS') ||
+                    error.message.includes('Failed to fetch') ||
+                    error.message.includes('NetworkError') ||
+                    error.name === 'TypeError' ||
+                    (error.message && error.message.toLowerCase().includes('cors'));
+                if (isCorsError) {
+                    corsAlert.classList.remove('hidden');
+                }
+            }
+        }
+
+        // Fetch average (/average)
+        async function fetchAverage() {
+            const corsAlert = document.getElementById('corsAlert');
+            const windowKey = document.getElementById('avgWindow').value;
+            const metric = document.getElementById('avgMetric').value;
+            const { start, end } = computeRange(windowKey);
+            const params = new URLSearchParams({
+                val: metric,
+                start: isoSeconds(start),
+                end: isoSeconds(end)
+            });
+            const valueEl = document.getElementById('avgValue');
+            try {
+                const response = await fetch(`${AVERAGE_URL}?${params.toString()}`, { method: 'GET', mode: 'cors' });
+                corsAlert.classList.add('hidden');
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                const payload = await response.json();
+                const val = payload.avg;
+                if (val === null || val === undefined) {
+                    valueEl.textContent = '--';
+                } else {
+                    const unit = metric === 'humidity_pct' ? '%' : (metric === 'pressure_hpa' ? 'hPa' : '°C');
+                    valueEl.textContent = `${Number(val).toFixed(2)} ${unit}`;
+                }
+            } catch (error) {
+                console.error('Error fetching average:', error);
+                valueEl.textContent = '--';
+                const isCorsError = error.message.includes('CORS') ||
+                    error.message.includes('Failed to fetch') ||
+                    error.message.includes('NetworkError') ||
+                    error.name === 'TypeError' ||
+                    (error.message && error.message.toLowerCase().includes('cors'));
+                if (isCorsError) {
+                    corsAlert.classList.remove('hidden');
+                }
+            }
+        }
+
+        // Pollers
+        function startGaugePolling() {
+            if (gaugeIntervalId) clearInterval(gaugeIntervalId);
+            fetchMetrics();
+            gaugeIntervalId = setInterval(() => {
+                if (!isPaused) fetchMetrics();
+            }, GAUGE_POLL_MS);
+        }
+
+        function startHistoryPolling() {
+            if (historyIntervalId) clearInterval(historyIntervalId);
+            fetchHistoricalData();
+            historyIntervalId = setInterval(() => {
+                if (!isPaused) fetchHistoricalData();
+            }, updateInterval);
+        }
+
+        function startAveragePolling() {
+            if (averageIntervalId) clearInterval(averageIntervalId);
+            fetchAverage();
+            averageIntervalId = setInterval(() => {
+                if (!isPaused) fetchAverage();
+            }, AVG_POLL_MS);
+        }
+
+        // Theme management
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+            document.getElementById('themeSelector').value = theme;
+            // Update charts to reflect theme changes
+            setTimeout(() => {
+                updateChartThemes();
+                fetchHistoricalData();
+            }, 100); // Small delay to ensure theme is applied
+        }
+
+        function loadTheme() {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            setTheme(savedTheme);
+        }
+
+        // Event listeners
+        document.getElementById('timeRange').addEventListener('change', () => {
+            fetchHistoricalData();
+        });
+
+        document.getElementById('updateInterval').addEventListener('change', (e) => {
+            updateInterval = parseInt(e.target.value, 10);
+            startHistoryPolling();
+        });
+
+        document.getElementById('themeSelector').addEventListener('change', (e) => {
+            setTheme(e.target.value);
+        });
+
+        document.getElementById('avgWindow').addEventListener('change', () => {
+            fetchAverage();
+        });
+
+        document.getElementById('avgMetric').addEventListener('change', () => {
+            fetchAverage();
+        });
+
+        document.getElementById('pauseBtn').addEventListener('click', () => {
+            isPaused = !isPaused;
+            const btn = document.getElementById('pauseBtn');
+            if (isPaused) {
+                btn.textContent = 'Resume';
+                btn.classList.remove('btn-outline');
+                btn.classList.add('btn-error');
+            } else {
+                btn.textContent = 'Pause';
+                btn.classList.remove('btn-error');
+                btn.classList.add('btn-outline');
+                fetchMetrics();
+                fetchHistoricalData();
+                fetchAverage();
+            }
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            Plotly.Plots.resize('tempChart');
+            Plotly.Plots.resize('humidityChart');
+            Plotly.Plots.resize('pressureChart');
+            Plotly.Plots.resize('qmpTempChart');
+            Plotly.Plots.resize('tempIndicator');
+            Plotly.Plots.resize('humidityIndicator');
+            Plotly.Plots.resize('pressureIndicator');
+        });
+
+        // Initialize
+        loadTheme(); // Load saved theme
+        initIndicators(); // Initialize gauge indicators
+        initCharts(); // Initialize line charts
+        startGaugePolling();
+        startHistoryPolling();
+        startAveragePolling();
+    </script>
+</body>
+</html>
