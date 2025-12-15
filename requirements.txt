@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+smbus2
+psycopg[binary]
+psycopg-pool
+plotly
